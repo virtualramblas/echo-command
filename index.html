@@ -2,64 +2,76 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Task 1.1 Audio Ingestion Harness</title>
+  <title>Task 1.2 Inference Engine</title>
   <style>
     body { font-family: monospace; background: #0c1017; color: #39ff14; padding: 24px; }
     button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #16222f; color: #39ff14; border: 1px solid #39ff14; }
-    #meter { width: 300px; height: 16px; background: #1a2332; margin-top: 15px; border: 1px solid #39ff14; }
-    #level { width: 0%; height: 100%; background: #39ff14; transition: width 0.05s ease; }
     #stats { margin-top: 20px; line-height: 1.6; }
+    .status-panel { border: 1px dashed #39ff14; padding: 15px; margin-top: 20px; border-radius: 4px; }
+    .command-hit { background: rgba(57, 255, 20, 0.2); animation: flash 1s ease-out; }
+    @keyframes flash {
+      from { background: rgba(57, 255, 20, 0.6); }
+      to { background: transparent; }
+    }
   </style>
 </head>
 <body>
-  <h2>Echo Command — Task 1.1: Audio Ingestion Harness</h2>
-  <button id="toggleBtn">Start Microphone Ingestion</button>
+  <h2>Echo Command — Task 1.2: Local ONNX Inference</h2>
+  <button id="toggleBtn" disabled>Loading Model...</button>
   
-  <div id="meter"><div id="level"></div></div>
-  <div id="stats">
-    Status: Offline<br>
-    Target Sample Rate: 16,000 Hz<br>
-    Chunks Dispatched: 0
+  <div class="status-panel">
+    <h3>📡 System Telemetry</h3>
+    <div id="stats">System Offline. Waiting for Initialization...</div>
   </div>
 
   <script type="module">
-    import { AudioPipeline } from './audio-pipeline.js';
+    import { VoiceController } from './app.js';
 
     const toggleBtn = document.getElementById('toggleBtn');
-    const levelBar = document.getElementById('level');
     const statsDiv = document.getElementById('stats');
 
-    const pipeline = new AudioPipeline({ targetSampleRate: 16000, batchSize: 1600 });
-    let totalChunks = 0;
+    // For testing/mocking, we can use a dummy ONNX model, or the actual exported NeuDecide model path.
+    const MODEL_PATH = 'https://raw.githubusercontent.com/onnx/models/main/validated/vision/classification/mnist/model/mnist-12.onnx'; // Placeholder validation model
+    
+    // Mapped labels expected from model output indices
+    const TOOL_MAP = {
+      0: "🎛️ SYSTEM: ACTIVE SONAR",
+      1: "🛡️ SHIELDS: BOW",
+      2: "🛡️ SHIELDS: STERN",
+      3: "🚀 WEAPON: TORPEDO",
+      4: "📡 SILENT RUNNING"
+    };
+
+    const controller = new VoiceController(MODEL_PATH, (action) => {
+      // Triggered when confidence exceeds threshold
+      const matchedCommand = TOOL_MAP[action.toolIndex] || `Unknown Code (${action.toolIndex})`;
+      
+      const hitElement = document.createElement('div');
+      hitElement.className = 'command-hit';
+      hitElement.style.padding = '8px';
+      hitElement.style.marginTop = '4px';
+      hitElement.innerHTML = `<strong>DETECTED:</strong> ${matchedCommand} | Confidence: ${(action.confidence * 100).toFixed(1)}%`;
+      
+      statsDiv.prepend(hitElement);
+    });
+
+    // Initialize background thread
+    controller.initialize(({ status, message }) => {
+      statsDiv.innerHTML = `System Status: [${status.toUpperCase()}] — ${message}`;
+      
+      if (status === 'ready') {
+        toggleBtn.innerText = 'Start Listening';
+        toggleBtn.removeAttribute('disabled');
+      }
+    });
 
     toggleBtn.addEventListener('click', async () => {
-      if (!pipeline.isRunning) {
-        await pipeline.start('./audio-recorder-worklet.js', (chunkFloat32) => {
-          totalChunks++;
-
-          // Calculate Root Mean Square (RMS) volume for live visual feedback
-          let sumSquares = 0;
-          for (let i = 0; i < chunkFloat32.length; i++) {
-            sumSquares += chunkFloat32[i] * chunkFloat32[i];
-          }
-          const rms = Math.sqrt(sumSquares / chunkFloat32.length);
-          const percent = Math.min(100, Math.round(rms * 400));
-          levelBar.style.width = `${percent}%`;
-
-          statsDiv.innerHTML = `
-            Status: 🟢 Streaming Active<br>
-            Target Sample Rate: 16,000 Hz<br>
-            Last Chunk Length: ${chunkFloat32.length} samples (100ms)<br>
-            Total Chunks Sent: ${totalChunks}
-          `;
-        });
-
-        toggleBtn.innerText = 'Stop Microphone Ingestion';
+      if (!controller.pipeline.isRunning) {
+        await controller.startListening();
+        toggleBtn.innerText = 'Stop Listening';
       } else {
-        await pipeline.stop();
-        toggleBtn.innerText = 'Start Microphone Ingestion';
-        levelBar.style.width = '0%';
-        statsDiv.innerHTML = 'Status: 🔴 Stopped';
+        await controller.stopListening();
+        toggleBtn.innerText = 'Start Listening';
       }
     });
   </script>
