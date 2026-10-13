@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Echo Command: Submarine Navigation & Physics (Task 2.1)</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #050a10;
+      font-family: 'Courier New', Courier, monospace;
+      user-select: none;
+    }
+
+    #viewport {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 1;
+    }
+
+    /* HUD Elements */
+    .hud-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 10;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      box-sizing: border-box;
+      padding: 24px;
+      color: #39ff14;
+    }
+
+    .hud-header {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid #1a2f4c;
+      padding-bottom: 10px;
+    }
+
+    .telemetry-block {
+      background: rgba(13, 22, 36, 0.75);
+      border: 1px solid #39ff14;
+      padding: 12px 18px;
+      border-radius: 4px;
+      box-shadow: 0 0 10px rgba(57, 255, 20, 0.15);
+    }
+
+    .telemetry-row {
+      font-size: 14px;
+      margin-bottom: 4px;
+      letter-spacing: 1px;
+    }
+
+    .warning-flash {
+      color: #ff3333 !important;
+      border-color: #ff3333 !important;
+      box-shadow: 0 0 15px rgba(255, 51, 51, 0.5) !important;
+      animation: alertPulse 0.4s infinite alternate;
+    }
+
+    @keyframes alertPulse {
+      from { opacity: 0.5; }
+      to { opacity: 1.0; }
+    }
+
+    .controls-legend {
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px dashed #1a2f4c;
+      padding: 10px 14px;
+      font-size: 11px;
+      color: #8fa0ba;
+      max-width: 320px;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="viewport"></div>
+
+  <div class="hud-layer">
+    <div class="hud-header">
+      <div>
+        <h3 style="margin: 0; letter-spacing: 2px;">TASK 2.1: SUB-SURFACE SIMULATOR</h3>
+        <span style="font-size: 11px; color: #8fa0ba;">HYDRODYNAMIC 6-DOF INERTIA ENGINE</span>
+      </div>
+      <div id="alarmCard" class="telemetry-block" style="display: none;">
+        TERRAIN PROXIMITY ALERT
+      </div>
+    </div>
+
+    <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+      <div class="controls-legend">
+        <strong>FLIGHT CONTROLS:</strong><br>
+        W / S : Throttle (Forward / Reverse)<br>
+        A / D : Rudder (Turn Left / Right)<br>
+        Arrow Up / Down : Dive Planes (Pitch)<br>
+        Q / E : Manual Roll Banking<br>
+        *Gamepad Sticks Fully Supported
+      </div>
+
+      <div class="telemetry-block" id="telemetryCard">
+        <div class="telemetry-row">VELOCITY: <span id="tel-speed">00</span> KTS</div>
+        <div class="telemetry-row">DEPTH: <span id="tel-depth">000</span> M</div>
+        <div class="telemetry-row">HEADING: <span id="tel-heading">000</span>°</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+    import { SubmarineRig } from './SubmarineRig.js';
+    import { TrenchEnvironment } from './TrenchEnvironment.js';
+    import { MarineSnow } from './MarineSnow.js';
+
+    // 1. Scene & Renderer Setup
+    const container = document.getElementById('viewport');
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x050a10, 0.022); // Deep water attenuation
+
+    const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 400);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    // 2. Instantiate Systems
+    const sub = new SubmarineRig(scene, camera);
+    const trench = new TrenchEnvironment(scene);
+    const marineSnow = new MarineSnow(scene, 1200);
+
+    // 3. Input Polling
+    const keys = {};
+    window.addEventListener('keydown', (e) => keys[e.code] = true);
+    window.addEventListener('keyup', (e) => keys[e.code] = false);
+
+    function pollInputs() {
+      let forward = 0;
+      let rudder = 0;
+      let dive = 0;
+      let roll = 0;
+
+      // Keyboard mapping
+      if (keys['KeyW']) forward += 1.0;
+      if (keys['KeyS']) forward -= 0.6;
+      if (keys['KeyA']) rudder -= 1.0;
+      if (keys['KeyD']) rudder += 1.0;
+      if (keys['ArrowUp']) dive -= 1.0;
+      if (keys['ArrowDown']) dive += 1.0;
+      if (keys['KeyQ']) roll -= 1.0;
+      if (keys['KeyE']) roll += 1.0;
+
+      // Gamepad mapping
+      const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+      if (gamepads[0]) {
+        const gp = gamepads[0];
+        // Left stick X: rudder, Right stick Y: dive
+        if (Math.abs(gp.axes[0]) > 0.1) rudder = gp.axes[0];
+        if (Math.abs(gp.axes[3]) > 0.1) dive = gp.axes[3];
+        // Triggers for throttle (RT = forward, LT = reverse)
+        const rt = gp.buttons[7] ? gp.buttons[7].value : 0;
+        const lt = gp.buttons[6] ? gp.buttons[6].value : 0;
+        forward += (rt - lt * 0.5);
+      }
+
+      return { forward, rudder, dive, roll };
+    }
+
+    // 4. HUD Hooks
+    const telSpeed = document.getElementById('tel-speed');
+    const telDepth = document.getElementById('tel-depth');
+    const telHeading = document.getElementById('tel-heading');
+    const alarmCard = document.getElementById('alarmCard');
+
+    // 5. Game Loop
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+
+      // Update Submarine Inputs and Physics
+      const inputs = pollInputs();
+      sub.setInputs(inputs);
+      sub.update(delta);
+
+      // Trench chunking and collisions
+      trench.update(sub.mesh.position.z);
+      const collision = trench.checkCollision(sub.mesh.position);
+
+      if (collision.isColliding) {
+        alarmCard.style.display = 'block';
+        alarmCard.classList.add('warning-flash');
+      } else {
+        alarmCard.style.display = 'none';
+        alarmCard.classList.remove('warning-flash');
+      }
+
+      // Particles
+      marineSnow.update(sub.mesh.position);
+
+      // Refresh HUD
+      const tel = sub.getTelemetry();
+      telSpeed.innerText = String(tel.speedKnots).padStart(2, '0');
+      telDepth.innerText = String(tel.depthMeters).padStart(3, '0');
+      telHeading.innerText = String(tel.headingDeg).padStart(3, '0');
+
+      renderer.render(scene, camera);
+    }
+
+    // Window resizing
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    animate();
+  </script>
+</body>
+</html>
