@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Task 1.1 Audio Ingestion Harness</title>
+  <style>
+    body { font-family: monospace; background: #0c1017; color: #39ff14; padding: 24px; }
+    button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #16222f; color: #39ff14; border: 1px solid #39ff14; }
+    #meter { width: 300px; height: 16px; background: #1a2332; margin-top: 15px; border: 1px solid #39ff14; }
+    #level { width: 0%; height: 100%; background: #39ff14; transition: width 0.05s ease; }
+    #stats { margin-top: 20px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <h2>Echo Command — Task 1.1: Audio Ingestion Harness</h2>
+  <button id="toggleBtn">Start Microphone Ingestion</button>
+  
+  <div id="meter"><div id="level"></div></div>
+  <div id="stats">
+    Status: Offline<br>
+    Target Sample Rate: 16,000 Hz<br>
+    Chunks Dispatched: 0
+  </div>
+
+  <script type="module">
+    import { AudioPipeline } from './audio-pipeline.js';
+
+    const toggleBtn = document.getElementById('toggleBtn');
+    const levelBar = document.getElementById('level');
+    const statsDiv = document.getElementById('stats');
+
+    const pipeline = new AudioPipeline({ targetSampleRate: 16000, batchSize: 1600 });
+    let totalChunks = 0;
+
+    toggleBtn.addEventListener('click', async () => {
+      if (!pipeline.isRunning) {
+        await pipeline.start('./audio-recorder-worklet.js', (chunkFloat32) => {
+          totalChunks++;
+
+          // Calculate Root Mean Square (RMS) volume for live visual feedback
+          let sumSquares = 0;
+          for (let i = 0; i < chunkFloat32.length; i++) {
+            sumSquares += chunkFloat32[i] * chunkFloat32[i];
+          }
+          const rms = Math.sqrt(sumSquares / chunkFloat32.length);
+          const percent = Math.min(100, Math.round(rms * 400));
+          levelBar.style.width = `${percent}%`;
+
+          statsDiv.innerHTML = `
+            Status: 🟢 Streaming Active<br>
+            Target Sample Rate: 16,000 Hz<br>
+            Last Chunk Length: ${chunkFloat32.length} samples (100ms)<br>
+            Total Chunks Sent: ${totalChunks}
+          `;
+        });
+
+        toggleBtn.innerText = 'Stop Microphone Ingestion';
+      } else {
+        await pipeline.stop();
+        toggleBtn.innerText = 'Start Microphone Ingestion';
+        levelBar.style.width = '0%';
+        statsDiv.innerHTML = 'Status: 🔴 Stopped';
+      }
+    });
+  </script>
+</body>
+</html>
