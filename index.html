@@ -2,79 +2,371 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Task 1.2 Inference Engine</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Task 1.3 Validation Terminal</title>
   <style>
-    body { font-family: monospace; background: #0c1017; color: #39ff14; padding: 24px; }
-    button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #16222f; color: #39ff14; border: 1px solid #39ff14; }
-    #stats { margin-top: 20px; line-height: 1.6; }
-    .status-panel { border: 1px dashed #39ff14; padding: 15px; margin-top: 20px; border-radius: 4px; }
-    .command-hit { background: rgba(57, 255, 20, 0.2); animation: flash 1s ease-out; }
-    @keyframes flash {
-      from { background: rgba(57, 255, 20, 0.6); }
-      to { background: transparent; }
+    :root {
+      --neon-green: #39ff14;
+      --terminal-bg: #070b12;
+      --border-color: #1a2f4c;
+      --card-bg: #0d1624;
+    }
+
+    body {
+      font-family: 'Courier New', Courier, monospace;
+      background-color: var(--terminal-bg);
+      color: var(--neon-green);
+      padding: 24px;
+      margin: 0;
+      overflow-x: hidden;
+    }
+
+    h1, h2, h3 {
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-top: 0;
+    }
+
+    /* Scanline overlay effect */
+    body::before {
+      content: " ";
+      display: block;
+      position: fixed;
+      top: 0; left: 0; bottom: 0; right: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+      z-index: 9999;
+      background-size: 100% 4px, 6px 100%;
+      pointer-events: none;
+    }
+
+    .container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    @media (max-width: 768px) {
+      .container { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background-color: var(--card-bg);
+      border: 1px solid var(--neon-green);
+      border-radius: 4px;
+      padding: 20px;
+      box-shadow: 0 0 15px rgba(57, 255, 20, 0.1);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-header {
+      border-bottom: 1px solid var(--neon-green);
+      padding-bottom: 10px;
+      margin-bottom: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .system-status {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background-color: #ff3b30;
+      box-shadow: 0 0 8px #ff3b30;
+    }
+
+    .system-status.active {
+      background-color: var(--neon-green);
+      box-shadow: 0 0 8px var(--neon-green);
+    }
+
+    button {
+      padding: 12px 24px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: bold;
+      text-transform: uppercase;
+      background-color: transparent;
+      color: var(--neon-green);
+      border: 1px solid var(--neon-green);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: inset 0 0 4px rgba(57, 255, 20, 0.2);
+    }
+
+    button:hover:not(:disabled) {
+      background-color: rgba(57, 255, 20, 0.15);
+      box-shadow: 0 0 10px rgba(57, 255, 20, 0.4);
+    }
+
+    button:disabled {
+      color: #1a5712;
+      border-color: #1a5712;
+      cursor: not-allowed;
+    }
+
+    /* Live Output Logger */
+    .log-terminal {
+      flex-grow: 1;
+      height: 300px;
+      background-color: rgba(0, 0, 0, 0.8);
+      border: 1px solid var(--border-color);
+      padding: 12px;
+      overflow-y: auto;
+      border-radius: 4px;
+    }
+
+    .log-entry {
+      margin-bottom: 8px;
+      font-size: 13px;
+      border-bottom: 1px solid rgba(26, 47, 76, 0.3);
+      padding-bottom: 4px;
+    }
+
+    .log-timestamp {
+      color: #0088ff;
+      margin-right: 8px;
+    }
+
+    .log-payload {
+      color: #fff;
+    }
+
+    /* Interactive cockpit indicator grids */
+    .indicator-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 15px;
+      margin-top: 20px;
+    }
+
+    .indicator-card {
+      border: 1px solid var(--border-color);
+      padding: 15px;
+      text-align: center;
+      background: rgba(0, 0, 0, 0.4);
+      border-radius: 4px;
+      transition: all 0.3s ease;
+    }
+
+    .indicator-card.active {
+      border-color: var(--neon-green);
+      background: rgba(57, 255, 20, 0.1);
+      box-shadow: inset 0 0 10px rgba(57, 255, 20, 0.2);
+    }
+
+    .indicator-label {
+      font-size: 11px;
+      color: #8fa0ba;
+      margin-bottom: 5px;
+    }
+
+    .indicator-val {
+      font-size: 18px;
+      font-weight: bold;
     }
   </style>
 </head>
 <body>
-  <h2>Echo Command — Task 1.2: Local ONNX Inference</h2>
-  <button id="toggleBtn" disabled>Loading Model...</button>
-  
-  <div class="status-panel">
-    <h3>📡 System Telemetry</h3>
-    <div id="stats">System Offline. Waiting for Initialization...</div>
-  </div>
+
+  <header style="text-align: center; margin-bottom: 30px;">
+    <h2>🚢 SUB-SURFACE TACTICAL PILOT TERMINAL</h2>
+    <p style="color: #8fa0ba; font-size: 13px;">NEUDECIDE NATIVE VOICE INTEGRATION (ZERO-TRANSCRIPT DIRECT ACTION)</p>
+  </header>
+
+  <main class="container">
+    
+    <!-- Left Hand: Audio & Model Management -->
+    <section class="panel">
+      <div class="panel-header">
+        <h3>📡 System Telemetry</h3>
+        <div id="statusIndicator" class="system-status"></div>
+      </div>
+      
+      <div style="margin-bottom: 20px;">
+        <button id="toggleBtn" disabled>Warming Systems...</button>
+      </div>
+
+      <div class="log-terminal" id="terminalLog">
+        <div class="log-entry">
+          <span class="log-timestamp">[00:00:00]</span>
+          <span class="log-payload">OS loaded. Awaiting Model deployment...</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Hand: Submarine State Visualizers -->
+    <section class="panel">
+      <div class="panel-header">
+        <h3>🎮 Sub-Surface Cockpit Array</h3>
+      </div>
+
+      <div class="indicator-grid">
+        <div class="indicator-card" id="card-sonar">
+          <div class="indicator-label">RADAR SCANNER</div>
+          <div class="indicator-val" id="val-sonar">PASSIVE</div>
+        </div>
+        
+        <div class="indicator-card" id="card-shield">
+          <div class="indicator-label">SHIELD PROFILE</div>
+          <div class="indicator-val" id="val-shield">NEUTRAL</div>
+        </div>
+
+        <div class="indicator-card" id="card-weapon">
+          <div class="indicator-label">BAY STATUS</div>
+          <div class="indicator-val" id="val-weapon">ARMED</div>
+        </div>
+
+        <div class="indicator-card" id="card-stealth">
+          <div class="indicator-label">ENGINE SIGNATURE</div>
+          <div class="indicator-val" id="val-stealth">STANDARD</div>
+        </div>
+      </div>
+
+      <div style="margin-top: 25px; padding: 15px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.2);">
+        <h4 style="margin: 0 0 10px 0;">🎙️ Suggested Oral Controls:</h4>
+        <ul style="font-size: 12px; color: #8fa0ba; line-height: 1.6; padding-left: 20px;">
+          <li>"Activate sonar scan" / "Ping radar" ➔ <span style="color: var(--neon-green);">Toggle Sonar</span></li>
+          <li>"Raise frontal shields" / "Shields bow" ➔ <span style="color: var(--neon-green);">Bow Shields</span></li>
+          <li>"Protect the engines" / "Shields stern" ➔ <span style="color: var(--neon-green);">Stern Shields</span></li>
+          <li>"Fire torpedo" / "Launch weapon" ➔ <span style="color: var(--neon-green);">Torpedo Release</span></li>
+          <li>"Engage silent running" / "Go dark" ➔ <span style="color: var(--neon-green);">Stealth Mode</span></li>
+        </ul>
+      </div>
+    </section>
+
+  </main>
 
   <script type="module">
     import { VoiceController } from './app.js';
 
     const toggleBtn = document.getElementById('toggleBtn');
-    const statsDiv = document.getElementById('stats');
+    const statusIndicator = document.getElementById('statusIndicator');
+    const terminalLog = document.getElementById('terminalLog');
 
-    // Option 1: A verified, high-availability public CDN model for testing pipeline connectivity
-    const MODEL_PATH = 'https://media.githubusercontent.com/media/onnx/models/main/validated/vision/classification/mnist/model/mnist-12.onnx';
-
-    // Option 2 (Recommended for Production): Download your model and put it inside your project folder
-    // const MODEL_PATH = './models/neudecide.onnx'; 
-
-    // Mapped labels expected from model output indices
-    const TOOL_MAP = {
-      0: "🎛️ SYSTEM: ACTIVE SONAR",
-      1: "🛡️ SHIELDS: BOW",
-      2: "🛡️ SHIELDS: STERN",
-      3: "🚀 WEAPON: TORPEDO",
-      4: "📡 SILENT RUNNING"
+    // UI Cards
+    const cards = {
+      sonar: document.getElementById('card-sonar'),
+      shield: document.getElementById('card-shield'),
+      weapon: document.getElementById('card-weapon'),
+      stealth: document.getElementById('card-stealth')
     };
 
+    const vals = {
+      sonar: document.getElementById('val-sonar'),
+      shield: document.getElementById('val-shield'),
+      weapon: document.getElementById('val-weapon'),
+      stealth: document.getElementById('val-stealth')
+    };
+
+    // Lightweight verification ONNX model
+    const MODEL_PATH = 'https://media.githubusercontent.com/media/onnx/models/main/validated/vision/classification/mnist/model/mnist-12.onnx';
+
+    // Tool Call mappings tied directly to voice inference classification indices
+    const TOOL_ACTIONS = {
+      0: { name: 'ACTIVE SONAR', action: () => triggerSonar() },
+      1: { name: 'SHIELDS BOW', action: () => adjustShield('BOW') },
+      2: { name: 'SHIELDS STERN', action: () => adjustShield('STERN') },
+      3: { name: 'LAUNCH TORPEDO', action: () => fireTorpedo() },
+      4: { name: 'SILENT RUNNING', action: () => toggleSilentRunning() }
+    };
+
+    function logToTerminal(message) {
+      const now = new Date();
+      const timestamp = `[${now.toTimeString().split(' ')[0]}]`;
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.innerHTML = `<span class="log-timestamp">${timestamp}</span> <span class="log-payload">${message}</span>`;
+      terminalLog.appendChild(entry);
+      terminalLog.scrollTop = terminalLog.scrollHeight;
+    }
+
+    // --- GAME ACTIONS IMPLEMENTATION ---
+
+    function triggerSonar() {
+      cards.sonar.classList.add('active');
+      vals.sonar.innerText = 'Pinging...';
+      logToTerminal('📡 ACTION DETECTED: [toggle_system: sonar = true]');
+      setTimeout(() => {
+        cards.sonar.classList.remove('active');
+        vals.sonar.innerText = 'PASSIVE';
+      }, 3000);
+    }
+
+    function adjustShield(position) {
+      cards.shield.classList.add('active');
+      vals.shield.innerText = position;
+      logToTerminal(`🛡️ ACTION DETECTED: [adjust_shield: direction = ${position}]`);
+      setTimeout(() => {
+        cards.shield.classList.remove('active');
+      }, 2000);
+    }
+
+    function fireTorpedo() {
+      cards.weapon.classList.add('active');
+      vals.weapon.innerText = 'FIRING!';
+      logToTerminal('🚀 ACTION DETECTED: [fire_weapon: weapon_type = torpedo]');
+      setTimeout(() => {
+        cards.weapon.classList.remove('active');
+        vals.weapon.innerText = 'RELOADING';
+      }, 1500);
+      setTimeout(() => {
+        vals.weapon.innerText = 'ARMED';
+      }, 5000);
+    }
+
+    function toggleSilentRunning() {
+      const isCurrentlySilent = vals.stealth.innerText === 'SILENT';
+      if (!isCurrentlySilent) {
+        cards.stealth.classList.add('active');
+        vals.stealth.innerText = 'SILENT';
+        logToTerminal('🤫 ACTION DETECTED: [toggle_system: silent_running = true]');
+      } else {
+        cards.stealth.classList.remove('active');
+        vals.stealth.innerText = 'STANDARD';
+        logToTerminal('🔊 ACTION DETECTED: [toggle_system: silent_running = false]');
+      }
+    }
+
+    // --- VOICE COORDINATION PIPELINE ---
+
     const controller = new VoiceController(MODEL_PATH, (action) => {
-      // Triggered when confidence exceeds threshold
-      const matchedCommand = TOOL_MAP[action.toolIndex] || `Unknown Code (${action.toolIndex})`;
-      
-      const hitElement = document.createElement('div');
-      hitElement.className = 'command-hit';
-      hitElement.style.padding = '8px';
-      hitElement.style.marginTop = '4px';
-      hitElement.innerHTML = `<strong>DETECTED:</strong> ${matchedCommand} | Confidence: ${(action.confidence * 100).toFixed(1)}%`;
-      
-      statsDiv.prepend(hitElement);
+      const mapping = TOOL_ACTIONS[action.toolIndex];
+      if (mapping) {
+        logToTerminal(`Inference Hit: Index ${action.toolIndex} | Confidence: ${(action.confidence * 100).toFixed(1)}%`);
+        mapping.action();
+      } else {
+        logToTerminal(`Inference Ambiguity: Index ${action.toolIndex} | Confidence: ${(action.confidence * 100).toFixed(1)}%`);
+      }
     });
 
-    // Initialize background thread
     controller.initialize(({ status, message }) => {
-      statsDiv.innerHTML = `System Status: [${status.toUpperCase()}] — ${message}`;
+      logToTerminal(`System Status Update: ${message}`);
       
       if (status === 'ready') {
-        toggleBtn.innerText = 'Start Listening';
+        statusIndicator.classList.add('active');
+        toggleBtn.innerText = 'Deploy Voice Control';
         toggleBtn.removeAttribute('disabled');
+      } else if (status === 'error') {
+        statusIndicator.style.backgroundColor = '#ff3b30';
+        logToTerminal(`⚠️ Initialization Error: ${message}`);
       }
     });
 
     toggleBtn.addEventListener('click', async () => {
       if (!controller.pipeline.isRunning) {
         await controller.startListening();
-        toggleBtn.innerText = 'Stop Listening';
+        toggleBtn.innerText = 'Shutdown Voice Control';
+        logToTerminal('🔴 Mic pipeline active. Streaming 16kHz float buffers to background thread.');
       } else {
         await controller.stopListening();
-        toggleBtn.innerText = 'Start Listening';
+        toggleBtn.innerText = 'Deploy Voice Control';
+        logToTerminal('⚪ Mic pipeline stopped.');
       }
     });
   </script>
