@@ -1,286 +1,344 @@
+/**
+ * CockpitHUD.js
+ * High-performance 2D vector HUD rendered to an offscreen canvas
+ * Designed for blitting onto the viewport overlay in cockpit-sim.html
+ */
 export class CockpitHUD {
   constructor() {
-    this.shieldStates = { bow: 100, stern: 100, port: 100, starboard: 100 };
-    this.focusedQuadrant = 'bow';
-    this.sonarActive = false;
-    this.sonarAngle = 0;
-    this.sonarBlips = [
-      { dist: 0.65, angle: 0.8, alpha: 0.0 },
-      { dist: 0.42, angle: 2.3, alpha: 0.0 }
-    ];
-    this.torpedoStatus = 'READY';
-    this.silentRunning = false;
-    this.decibelLevel = 42; // Base ambient submarine hum in dB
-
-    this.initCanvasHUD();
-  }
-
-  initCanvasHUD() {
     this.canvas = document.createElement('canvas');
-    this.canvas.id = 'cockpit-canvas';
-    this.canvas.width = 1024;
-    this.canvas.height = 1024;
+    this.canvas.width = 1920;
+    this.canvas.height = 1080;
     this.ctx = this.canvas.getContext('2d');
+
+    // Tactical State Variables
+    this.sonarActive = false;
+    this.sonarTimer = 0.0;
+    this.sonarRadius = 0.0;
+    this.radarAngle = 0.0;
+
+    this.focusedQuadrant = 'all'; // 'bow', 'stern', 'port', 'starboard', 'all'
+    this.shieldFocusTimer = 0.0;
+
+    this.torpedoState = 'ARMED';   // 'ARMED', 'LAUNCHING', 'RELOADING'
+    this.reloadProgress = 1.0;
+
+    this.silentRunning = false;
+    this.acousticDb = 38.0;
+
+    // Contact Blips for Sonar (Normalized polar coords: dist [0-1], angle [rad])
+    this.contacts = [
+      { dist: 0.65, angle: 0.85, alpha: 0.0 },
+      { dist: 0.42, angle: 2.30, alpha: 0.0 },
+      { dist: 0.78, angle: 4.10, alpha: 0.0 }
+    ];
+
+    // Styling Palette
+    this.colors = {
+      neonGreen: '#39ff14',
+      dimGreen: 'rgba(57, 255, 20, 0.25)',
+      alertCyan: '#00f0ff',
+      dimCyan: 'rgba(0, 240, 255, 0.2)',
+      warningRed: '#ff3344',
+      bgDark: 'rgba(7, 11, 18, 0.45)'
+    };
   }
 
-  // --- Tool Action Handlers (NeuDecide Direct Mappings) ---
-
-  adjustShield(quadrant) {
-    this.focusedQuadrant = quadrant.toLowerCase();
-    // Rebalance shield quadrant power
-    for (let k of ['bow', 'stern', 'port', 'starboard']) {
-      this.shieldStates[k] = (k === this.focusedQuadrant) ? 100 : 45;
-    }
-  }
+  // --- External Tactical Event Handlers ---
 
   triggerSonarPing() {
     this.sonarActive = true;
-    // Reveal contacts on ping
-    for (let b of this.sonarBlips) {
-      b.alpha = 1.0;
-    }
-    setTimeout(() => {
-      this.sonarActive = false;
-    }, 4500);
+    this.sonarTimer = 0.0;
+    this.sonarRadius = 0.0;
+  }
+
+  adjustShield(quadrant) {
+    this.focusedQuadrant = quadrant.toLowerCase();
+    this.shieldFocusTimer = 3.5; // Glow duration in seconds
   }
 
   fireTorpedo() {
-    if (this.torpedoStatus !== 'READY') return false;
-    this.torpedoStatus = 'LAUNCHING';
-    setTimeout(() => { this.torpedoStatus = 'RELOADING'; }, 1200);
-    setTimeout(() => { this.torpedoStatus = 'READY'; }, 5500);
-    return true;
+    if (this.torpedoState !== 'ARMED') return;
+    this.torpedoState = 'LAUNCHING';
+    this.reloadProgress = 0.0;
+
+    setTimeout(() => {
+      this.torpedoState = 'RELOADING';
+    }, 1200);
   }
 
-  toggleSilentRunning(enable) {
-    this.silentRunning = (enable !== undefined) ? enable : !this.silentRunning;
-    this.decibelLevel = this.silentRunning ? 18 : 42;
+  toggleSilentRunning() {
+    this.silentRunning = !this.silentRunning;
   }
 
-  // --- Render Loop for Cockpit Graphics ---
+  // --- Main Render Loop ---
 
-  draw(telemetry, delta) {
+  draw(telemetry = {}, delta = 0.016) {
     const ctx = this.ctx;
     const w = this.canvas.width;
     const h = this.canvas.height;
 
+    // 1. Clear Frame
     ctx.clearRect(0, 0, w, h);
 
-    // Color Palette
-    const neonGreen = '#39ff14';
-    const dimGreen = 'rgba(57, 255, 20, 0.25)';
-    const alertCyan = '#00f0ff';
-    const warningRed = '#ff3333';
+    // 2. Advance Internal Timers
+    this.updateTimers(delta);
 
-    ctx.strokeStyle = neonGreen;
-    ctx.fillStyle = neonGreen;
-    ctx.font = 'bold 16px "Courier New", monospace';
-    ctx.lineWidth = 2;
-
-    // 1. Draw Sonar Scope (Bottom-Left)
-    this.drawSonar(ctx, 160, h - 160, 110, delta);
-
-    // 2. Draw Shield Array (Bottom-Right)
-    this.drawShields(ctx, w - 160, h - 160, 100);
-
-    // 3. Draw Pitch Ladder / Gyro Horizon (Center)
-    this.drawPitchLadder(ctx, w / 2, h / 2, telemetry);
-
-    // 4. Draw Ordnance Status & Silent Running (Bottom Center)
-    this.drawTacticalStatus(ctx, w / 2, h - 80);
-
-    // 5. Draw Decibel Acoustic Meter (Top-Right)
-    this.drawAcousticMeter(ctx, w - 240, 60);
+    // 3. Render Tactical Panels
+    this.drawCrosshairAndPitch(ctx, w / 2, h / 2, telemetry);
+    this.drawSonarScope(ctx, 220, h - 220, 150);
+    this.drawShieldQuadrantArray(ctx, w - 220, h - 220, 110);
+    this.drawAcousticMeter(ctx, 100, 140, telemetry);
+    this.drawWeaponBay(ctx, w - 340, 140);
+    this.drawTelemetryReadout(ctx, w / 2, 70, telemetry);
   }
 
-  drawSonar(ctx, cx, cy, radius, delta) {
-    // Outer Scope Rings
+  updateTimers(delta) {
+    // Sonar sweep rotation
+    this.radarAngle += delta * 1.8;
+    if (this.radarAngle > Math.PI * 2) this.radarAngle -= Math.PI * 2;
+
+    // Active sonar ping wave expansion
+    if (this.sonarActive) {
+      this.sonarTimer += delta;
+      this.sonarRadius += delta * 90; // Pulse speed
+      if (this.sonarTimer > 3.0) {
+        this.sonarActive = false;
+      }
+    }
+
+    // Shield highlight decay
+    if (this.shieldFocusTimer > 0) {
+      this.shieldFocusTimer = Math.max(0, this.shieldFocusTimer - delta);
+      if (this.shieldFocusTimer === 0) {
+        this.focusedQuadrant = 'all';
+      }
+    }
+
+    // Torpedo reloading cycle
+    if (this.torpedoState === 'RELOADING') {
+      this.reloadProgress = Math.min(1.0, this.reloadProgress + delta * 0.22);
+      if (this.reloadProgress >= 1.0) {
+        this.torpedoState = 'ARMED';
+      }
+    }
+
+    // Acoustic noise simulation
+    const targetDb = this.silentRunning ? 14.0 : 42.0;
+    this.acousticDb += (targetDb - this.acousticDb) * delta * 2.0;
+  }
+
+  // --- Sub-panel Renderers ---
+
+  drawCrosshairAndPitch(ctx, cx, cy, telemetry) {
+    ctx.save();
+    ctx.strokeStyle = this.colors.neonGreen;
+    ctx.lineWidth = 1.5;
+
+    // Center reticle
+    ctx.beginPath();
+    ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+    ctx.moveTo(cx - 30, cy); ctx.lineTo(cx - 14, cy);
+    ctx.moveTo(cx + 14, cy); ctx.lineTo(cx + 30, cy);
+    ctx.moveTo(cx, cy - 30); ctx.lineTo(cx, cy - 14);
+    ctx.moveTo(cx, cy + 14); ctx.lineTo(cx, cy + 30);
+    ctx.stroke();
+
+    // Artificial horizon pitch rungs
+    const pitch = (telemetry.pitch || 0) * 120;
+    const roll = telemetry.roll || 0;
+
+    ctx.translate(cx, cy);
+    ctx.rotate(roll);
+
+    ctx.strokeStyle = this.colors.dimGreen;
+    for (let r = -2; r <= 2; r++) {
+      if (r === 0) continue;
+      const yOffset = r * 35 - pitch;
+      const width = Math.abs(r) === 1 ? 50 : 30;
+
+      ctx.beginPath();
+      ctx.moveTo(-width, yOffset);
+      ctx.lineTo(width, yOffset);
+      ctx.stroke();
+
+      ctx.fillStyle = this.colors.neonGreen;
+      ctx.font = '10px monospace';
+      ctx.fillText(`${r * 10}°`, width + 8, yOffset + 3);
+    }
+    ctx.restore();
+  }
+
+  drawSonarScope(ctx, cx, cy, radius) {
+    ctx.save();
+
+    // Backdrop
+    ctx.fillStyle = this.colors.bgDark;
     ctx.beginPath();
     ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-    ctx.arc(cx, cy, radius * 0.66, 0, Math.PI * 2);
-    ctx.arc(cx, cy, radius * 0.33, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(57, 255, 20, 0.3)';
-    ctx.stroke();
+    ctx.fill();
 
-    // Crosshairs
+    // Concentric range rings
+    ctx.strokeStyle = this.colors.dimGreen;
+    ctx.lineWidth = 1;
+    [0.33, 0.66, 1.0].forEach(factor => {
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * factor, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+
+    // Cross hairs
     ctx.beginPath();
-    ctx.moveTo(cx - radius, cy);
-    ctx.lineTo(cx + radius, cy);
-    ctx.moveTo(cx, cy - radius);
-    ctx.lineTo(cx, cy + radius);
+    ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy);
+    ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius);
     ctx.stroke();
 
-    // Sweeping Radar Hand
-    this.sonarAngle = (this.sonarAngle + delta * (this.sonarActive ? 3.5 : 1.2)) % (Math.PI * 2);
+    // Rotating sweep line
+    const sweepX = cx + Math.cos(this.radarAngle) * radius;
+    const sweepY = cy + Math.sin(this.radarAngle) * radius;
+    ctx.strokeStyle = this.colors.neonGreen;
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + Math.cos(this.sonarAngle) * radius, cy + Math.sin(this.sonarAngle) * radius);
-    ctx.strokeStyle = this.sonarActive ? '#00f0ff' : '#39ff14';
-    ctx.lineWidth = 2.5;
+    ctx.lineTo(sweepX, sweepY);
     ctx.stroke();
 
-    // Draw Radar Blips
-    for (let b of this.sonarBlips) {
-      if (b.alpha > 0.01) {
-        b.alpha = Math.max(0, b.alpha - delta * 0.25);
-        const bx = cx + Math.cos(b.angle) * (radius * b.dist);
-        const by = cy + Math.sin(b.angle) * (radius * b.dist);
+    // Active expanding sonar pulse wave
+    if (this.sonarActive && this.sonarRadius < radius) {
+      const alpha = Math.max(0, 1 - this.sonarRadius / radius);
+      ctx.strokeStyle = `rgba(0, 240, 255, ${alpha})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, this.sonarRadius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
-        ctx.fillStyle = `rgba(255, 51, 51, ${b.alpha})`;
+    // Contact blips
+    this.contacts.forEach(c => {
+      const angleDiff = Math.abs((this.radarAngle - c.angle + Math.PI * 2) % (Math.PI * 2));
+      if (angleDiff < 0.25 || (this.sonarActive && this.sonarRadius >= c.dist * radius)) {
+        c.alpha = 1.0;
+      } else {
+        c.alpha = Math.max(0, c.alpha - 0.015);
+      }
+
+      if (c.alpha > 0.05) {
+        const bx = cx + Math.cos(c.angle) * (c.dist * radius);
+        const by = cy + Math.sin(c.angle) * (c.dist * radius);
+        ctx.fillStyle = `rgba(255, 51, 68, ${c.alpha})`;
+        ctx.shadowColor = '#ff3344';
+        ctx.shadowBlur = 8;
         ctx.beginPath();
-        ctx.arc(bx, by, 5, 0, Math.PI * 2);
+        ctx.arc(bx, by, 4, 0, Math.PI * 2);
         ctx.fill();
-
-        // Contact label
-        ctx.fillStyle = `rgba(255, 51, 51, ${b.alpha * 0.8})`;
-        ctx.fillText('TRGT-01', bx + 8, by - 4);
+        ctx.shadowBlur = 0;
       }
-    }
+    });
 
-    // Title
-    ctx.fillStyle = '#39ff14';
-    ctx.fillText('SONAR SCANNER', cx - 55, cy + radius + 25);
-    ctx.font = '12px "Courier New", monospace';
-    ctx.fillText(this.sonarActive ? 'STATUS: ACTIVE PING' : 'STATUS: PASSIVE', cx - 65, cy + radius + 42);
-  }
-
-  drawShields(ctx, cx, cy, radius) {
-    const quadrants = [
-      { name: 'bow', angleStart: -Math.PI * 0.75, angleEnd: -Math.PI * 0.25, label: 'BOW' },
-      { name: 'starboard', angleStart: -Math.PI * 0.25, angleEnd: Math.PI * 0.25, label: 'STBD' },
-      { name: 'stern', angleStart: Math.PI * 0.25, angleEnd: Math.PI * 0.75, label: 'STERN' },
-      { name: 'port', angleStart: Math.PI * 0.75, angleEnd: Math.PI * 1.25, label: 'PORT' }
-    ];
-
-    // Submarine silhouette icon at center
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, 14, 38, 0, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(57, 255, 20, 0.2)';
-    ctx.fill();
-    ctx.strokeStyle = '#39ff14';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    // Shield Arcs
-    for (let q of quadrants) {
-      const isFocused = this.focusedQuadrant === q.name;
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius * 0.75, q.angleStart + 0.12, q.angleEnd - 0.12);
-      ctx.strokeStyle = isFocused ? '#00f0ff' : 'rgba(57, 255, 20, 0.4)';
-      ctx.lineWidth = isFocused ? 5 : 2;
-      ctx.stroke();
-
-      // Quadrant labels
-      const midAngle = (q.angleStart + q.angleEnd) / 2;
-      const lx = cx + Math.cos(midAngle) * (radius * 0.95);
-      const ly = cy + Math.sin(midAngle) * (radius * 0.95);
-      ctx.fillStyle = isFocused ? '#00f0ff' : 'rgba(57, 255, 20, 0.6)';
-      ctx.font = '11px "Courier New", monospace';
-      ctx.fillText(`${q.label} ${this.shieldStates[q.name]}%`, lx - 24, ly + 4);
-    }
-
-    ctx.font = 'bold 16px "Courier New", monospace';
-    ctx.fillStyle = '#39ff14';
-    ctx.fillText('SHIELD ARRAY', cx - 52, cy + radius + 25);
-  }
-
-  drawPitchLadder(ctx, cx, cy, telemetry) {
-    ctx.save();
-    ctx.translate(cx, cy);
-
-    // Rotate ladder by submarine roll
-    const rollRad = (telemetry.roll || 0);
-    ctx.rotate(-rollRad);
-
-    const pitchOffset = (telemetry.pitch || 0) * 80;
-
-    ctx.strokeStyle = 'rgba(57, 255, 20, 0.45)';
-    ctx.lineWidth = 1.5;
-
-    // Pitch rungs
-    for (let deg of [-20, -10, 0, 10, 20]) {
-      const y = pitchOffset - deg * 3.5;
-      if (Math.abs(y) > 120) continue;
-
-      const rungWidth = deg === 0 ? 90 : 50;
-      ctx.beginPath();
-      ctx.moveTo(-rungWidth, y);
-      ctx.lineTo(-15, y);
-      ctx.moveTo(15, y);
-      ctx.lineTo(rungWidth, y);
-      ctx.stroke();
-
-      // Draw tick marks
-      ctx.beginPath();
-      ctx.moveTo(-rungWidth, y);
-      ctx.lineTo(-rungWidth, y + (deg >= 0 ? 5 : -5));
-      ctx.moveTo(rungWidth, y);
-      ctx.lineTo(rungWidth, y + (deg >= 0 ? 5 : -5));
-      ctx.stroke();
-
-      if (deg !== 0) {
-        ctx.font = '10px "Courier New", monospace';
-        ctx.fillStyle = 'rgba(57, 255, 20, 0.5)';
-        ctx.fillText(String(Math.abs(deg)), rungWidth + 6, y + 3);
-      }
-    }
-
-    // Fixed center aircraft/sub reticle
-    ctx.beginPath();
-    ctx.arc(0, 0, 8, 0, Math.PI * 2);
-    ctx.moveTo(-20, 0); ctx.lineTo(-8, 0);
-    ctx.moveTo(8, 0); ctx.lineTo(20, 0);
-    ctx.moveTo(0, -20); ctx.lineTo(0, -8);
-    ctx.strokeStyle = '#00f0ff';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    // Header label
+    ctx.fillStyle = this.colors.neonGreen;
+    ctx.font = '12px monospace';
+    ctx.fillText('ACTIVE SONAR [PPI]', cx - 55, cy + radius + 22);
 
     ctx.restore();
   }
 
-  drawTacticalStatus(ctx, cx, cy) {
-    // Torpedo Status Box
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-    ctx.fillRect(cx - 220, cy - 25, 200, 50);
-    ctx.strokeStyle = (this.torpedoStatus === 'READY') ? '#39ff14' : '#ff3333';
+  drawShieldQuadrantArray(ctx, cx, cy, radius) {
+    ctx.save();
+    ctx.lineWidth = 6;
+
+    const quadrants = [
+      { name: 'bow', start: -Math.PI * 0.75, end: -Math.PI * 0.25 },
+      { name: 'starboard', start: -Math.PI * 0.25, end: Math.PI * 0.25 },
+      { name: 'stern', start: Math.PI * 0.25, end: Math.PI * 0.75 },
+      { name: 'port', start: Math.PI * 0.75, end: Math.PI * 1.25 }
+    ];
+
+    quadrants.forEach(q => {
+      const isFocused = this.focusedQuadrant === q.name;
+      const isAll = this.focusedQuadrant === 'all';
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, q.start + 0.1, q.end - 0.1);
+
+      if (isFocused) {
+        ctx.strokeStyle = this.colors.alertCyan;
+        ctx.shadowColor = this.colors.alertCyan;
+        ctx.shadowBlur = 15;
+      } else if (isAll) {
+        ctx.strokeStyle = this.colors.neonGreen;
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.strokeStyle = this.colors.dimGreen;
+        ctx.shadowBlur = 0;
+      }
+      ctx.stroke();
+    });
+
+    // Center sub profile silhouette
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = this.colors.dimGreen;
     ctx.lineWidth = 1.5;
-    ctx.strokeRect(cx - 220, cy - 25, 200, 50);
+    ctx.strokeRect(cx - 15, cy - 35, 30, 70);
 
-    ctx.fillStyle = (this.torpedoStatus === 'READY') ? '#39ff14' : '#ff3333';
-    ctx.font = '12px "Courier New", monospace';
-    ctx.fillText('TORPEDO TUBE 01', cx - 205, cy - 8);
-    ctx.font = 'bold 16px "Courier New", monospace';
-    ctx.fillText(this.torpedoStatus, cx - 205, cy + 14);
+    ctx.fillStyle = this.colors.neonGreen;
+    ctx.font = '12px monospace';
+    ctx.fillText(`SHIELDS: ${this.focusedQuadrant.toUpperCase()}`, cx - 55, cy + radius + 22);
 
-    // Silent Running Box
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-    ctx.fillRect(cx + 20, cy - 25, 200, 50);
-    ctx.strokeStyle = this.silentRunning ? '#00f0ff' : '#39ff14';
-    ctx.strokeRect(cx + 20, cy - 25, 200, 50);
-
-    ctx.fillStyle = this.silentRunning ? '#00f0ff' : '#39ff14';
-    ctx.font = '12px "Courier New", monospace';
-    ctx.fillText('ACOUSTIC PROFILE', cx + 35, cy - 8);
-    ctx.font = 'bold 16px "Courier New", monospace';
-    ctx.fillText(this.silentRunning ? 'SILENT RUNNING' : 'STANDARD (ACTIVE)', cx + 35, cy + 14);
+    ctx.restore();
   }
 
-  drawAcousticMeter(ctx, cx, cy) {
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(cx, cy, 210, 48);
-    ctx.strokeStyle = '#39ff14';
-    ctx.strokeRect(cx, cy, 210, 48);
+  drawAcousticMeter(ctx, x, y, telemetry) {
+    ctx.save();
+    ctx.strokeStyle = this.colors.dimGreen;
+    ctx.strokeRect(x, y, 160, 24);
 
-    ctx.fillStyle = '#8fa0ba';
-    ctx.font = '11px "Courier New", monospace';
-    ctx.fillText(`EMITTED NOISE: ${this.decibelLevel} dB`, cx + 10, cy + 18);
+    const fillRatio = Math.min(1.0, this.acousticDb / 80.0);
+    ctx.fillStyle = this.silentRunning ? this.colors.alertCyan : this.colors.neonGreen;
+    ctx.fillRect(x + 2, y + 2, (160 - 4) * fillRatio, 20);
 
-    // Audio bar visualizer
-    const maxBars = 18;
-    const activeBars = Math.round((this.decibelLevel / 60) * maxBars);
-    for (let i = 0; i < maxBars; i++) {
-      ctx.fillStyle = (i < activeBars) ? (i > 14 ? '#ff3333' : '#39ff14') : 'rgba(57, 255, 20, 0.15)';
-      ctx.fillRect(cx + 10 + i * 10, cy + 26, 7, 14);
+    ctx.fillStyle = '#fff';
+    ctx.font = '11px monospace';
+    ctx.fillText(`ACOUSTIC: ${this.acousticDb.toFixed(1)} dB`, x, y - 8);
+    ctx.fillText(this.silentRunning ? '[SILENT RUNNING]' : '[STANDARD]', x + 170, y + 16);
+    ctx.restore();
+  }
+
+  drawWeaponBay(ctx, x, y) {
+    ctx.save();
+    ctx.strokeStyle = this.colors.dimGreen;
+    ctx.strokeRect(x, y, 220, 24);
+
+    if (this.torpedoState === 'ARMED') {
+      ctx.fillStyle = this.colors.neonGreen;
+      ctx.fillRect(x + 2, y + 2, 216, 20);
+      ctx.fillStyle = '#070b12';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText('TORPEDO: ARMED & READY', x + 16, y + 16);
+    } else {
+      ctx.fillStyle = this.colors.warningRed;
+      ctx.fillRect(x + 2, y + 2, 216 * this.reloadProgress, 20);
+      ctx.fillStyle = '#fff';
+      ctx.font = '12px monospace';
+      ctx.fillText(`${this.torpedoState}: ${(this.reloadProgress * 100).toFixed(0)}%`, x + 16, y + 16);
     }
+    ctx.restore();
+  }
+
+  drawTelemetryReadout(ctx, cx, y, telemetry) {
+    ctx.save();
+    ctx.fillStyle = this.colors.neonGreen;
+    ctx.font = '14px monospace';
+    ctx.textAlign = 'center';
+
+    const speed = ((telemetry.speed || 0) * 1.94384).toFixed(1); // M/s to knots
+    const depth = Math.abs(telemetry.depth || 142.0).toFixed(1);
+    const heading = Math.round(telemetry.heading || 0);
+
+    ctx.fillText(
+      `SPD: ${speed} KTS  |  DEPTH: ${depth} M  |  HDG: ${heading.toString().padStart(3, '0')}°`,
+      cx,
+      y
+    );
+    ctx.restore();
   }
 }

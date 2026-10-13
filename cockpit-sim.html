@@ -2,20 +2,34 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Task 2.2: Sub-Surface Cockpit & Retro CRT Shader</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Echo Command: Sub-Surface — Cockpit Flight Deck</title>
   <style>
-    * { box-sizing: border-box; }
-    body, html {
-      margin: 0;
-      padding: 0;
-      width: 100vw;
-      height: 100vh;
-      overflow: hidden;
-      background-color: #000;
-      font-family: 'Courier New', Courier, monospace;
+    :root {
+      --neon-green: #39ff14;
+      --cyan-radar: #00f0ff;
+      --dark-navy: #02070e;
+      --panel-bg: rgba(7, 11, 18, 0.85);
+      --border-blue: rgba(0, 240, 255, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
       user-select: none;
     }
 
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--dark-navy);
+      font-family: 'Courier New', Courier, monospace;
+      color: var(--neon-green);
+    }
+
+    /* 3D WebGL Layer */
     #webgl-container {
       position: absolute;
       top: 0;
@@ -25,74 +39,155 @@
       z-index: 1;
     }
 
-    /* Screen UI Overlay */
-    .terminal-nav {
+    /* 2D High-Resolution Vector HUD Screen Overlay */
+    #hud-overlay-canvas {
       position: absolute;
-      top: 20px;
-      left: 20px;
-      z-index: 10;
-      color: #39ff14;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
       pointer-events: none;
     }
 
-    .command-prompt {
+    /* Top Mission Header */
+    .flight-header {
       position: absolute;
-      bottom: 20px;
+      top: 14px;
+      left: 20px;
+      right: 20px;
+      z-index: 10;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 18px;
+      background: var(--panel-bg);
+      border: 1px solid var(--border-blue);
+      border-radius: 4px;
+      backdrop-filter: blur(4px);
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.12);
+    }
+
+    .flight-header h1 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 2px;
+      color: var(--cyan-radar);
+      text-transform: uppercase;
+    }
+
+    .flight-header .telemetry-status {
+      font-size: 13px;
+      font-weight: bold;
+      color: var(--neon-green);
+    }
+
+    /* Bottom Tactical Command Console */
+    .command-bar {
+      position: absolute;
+      bottom: 16px;
       left: 50%;
       transform: translateX(-50%);
       z-index: 10;
       display: flex;
-      gap: 12px;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--panel-bg);
+      border: 1px solid var(--border-blue);
+      border-radius: 6px;
+      box-shadow: 0 0 20px rgba(0, 240, 255, 0.15);
+      backdrop-filter: blur(6px);
     }
 
     button.tactical-btn {
-      background: rgba(13, 22, 36, 0.85);
-      border: 1px solid #39ff14;
-      color: #39ff14;
-      padding: 8px 16px;
+      padding: 9px 15px;
       font-family: inherit;
-      font-size: 13px;
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      background: rgba(0, 240, 255, 0.05);
+      color: var(--cyan-radar);
+      border: 1px solid var(--border-blue);
+      border-radius: 4px;
       cursor: pointer;
-      border-radius: 3px;
-      transition: all 0.2s ease;
-      box-shadow: 0 0 8px rgba(57, 255, 20, 0.2);
+      outline: none;
+      transition: all 0.15s ease-in-out;
     }
 
     button.tactical-btn:hover {
-      background: rgba(57, 255, 20, 0.25);
-      box-shadow: 0 0 14px rgba(57, 255, 20, 0.5);
+      background: rgba(0, 240, 255, 0.2);
+      border-color: var(--cyan-radar);
+      box-shadow: 0 0 12px rgba(0, 240, 255, 0.5);
+    }
+
+    button.tactical-btn:active,
+    button.tactical-btn.btn-active {
+      background: var(--neon-green) !important;
+      color: var(--dark-navy) !important;
+      border-color: var(--neon-green) !important;
+      box-shadow: 0 0 22px var(--neon-green) !important;
+    }
+
+    button.tactical-btn.toggle-btn {
+      color: var(--neon-green);
+      border-color: rgba(57, 255, 20, 0.4);
+    }
+
+    /* Keybindings Help Pill */
+    .flight-help {
+      position: absolute;
+      top: 68px;
+      left: 20px;
+      z-index: 10;
+      padding: 8px 14px;
+      font-size: 11px;
+      color: #8fa0ba;
+      background: rgba(7, 11, 18, 0.7);
+      border: 1px solid rgba(143, 160, 186, 0.25);
+      border-radius: 4px;
+      pointer-events: none;
     }
   </style>
 </head>
 <body>
 
+  <!-- 3D Viewport Layer -->
   <div id="webgl-container"></div>
 
-  <div class="terminal-nav">
-    <h3 style="margin: 0; letter-spacing: 2px;">ECHO COMMAND // V-DISPLAY 2.2</h3>
-    <div style="font-size: 12px; color: #8fa0ba; margin-top: 4px;">
-      SIMULATED CRT SCANLINE RESOLUTION: 720 LINES | BARREL CURVATURE: ACTIVE
-    </div>
+  <!-- 2D High-Resolution HUD Layer -->
+  <canvas id="hud-overlay-canvas"></canvas>
+
+  <!-- Navigation Status Header -->
+  <header class="flight-header">
+    <h1>Sub-Surface Tactical Array // SS-09 ARCHELON</h1>
+    <div id="telemetryStatus" class="telemetry-status">SYSTEMS: ALL RIGS NOMINAL</div>
+  </header>
+
+  <div class="flight-help">
+    FLIGHT CONTROLS: [W/S] Pitch &middot; [A/D] Yaw/Roll &middot; [Shift/Ctrl] Throttle +/-
   </div>
 
-  <!-- Interactive buttons to test voice hotkeys manually -->
-  <div class="command-prompt">
-    <button class="tactical-btn" id="btn-sonar">Ping Radar [Sonar]</button>
-    <button class="tactical-btn" id="btn-shield-bow">Shields Bow</button>
-    <button class="tactical-btn" id="btn-shield-stern">Shields Stern</button>
-    <button class="tactical-btn" id="btn-fire">Launch Torpedo</button>
-    <button class="tactical-btn" id="btn-stealth">Go Dark [Stealth]</button>
-  </div>
+  <!-- Bottom Verbal/Manual Hotkey Bar -->
+  <nav class="command-bar">
+    <button id="btn-sonar" class="tactical-btn">Transmit Sonar [Ping]</button>
+    <button id="btn-shield-bow" class="tactical-btn">Shields Bow [Front]</button>
+    <button id="btn-shield-stern" class="tactical-btn">Shields Stern [Rear]</button>
+    <button id="btn-fire" class="tactical-btn">Fire Torpedo [Bay 1]</button>
+    <button id="btn-stealth" class="tactical-btn">Silent Running [Go Dark]</button>
+    <button id="btn-crt" class="tactical-btn toggle-btn">CRT Pass [ON]</button>
+  </nav>
 
+  <!-- Engine Script Orchestration -->
   <script type="module">
     import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
     import { SubmarineRig } from './SubmarineRig.js';
     import { TrenchEnvironment } from './TrenchEnvironment.js';
     import { MarineSnow } from './MarineSnow.js';
-    import { PostProcessingPipeline } from './PostProcessingPipeline.js';
     import { CockpitHUD } from './CockpitHUD.js';
+    import { PostProcessingPipeline } from './PostProcessingPipeline.js';
 
-    // 1. Scene, Camera, and Renderer
+    // 1. Core Scene, Camera, and Renderer Initialization
     const container = document.getElementById('webgl-container');
     const scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2(0x02070e, 0.024);
@@ -101,101 +196,170 @@
     const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x02070e, 1.0);
     container.appendChild(renderer.domElement);
 
-    // 2. Gameplay Systems
+    // 2. Underwater Illumination (Prevents pure black polygon occlusion)
+    const ambientLight = new THREE.AmbientLight(0x336688, 1.8);
+    scene.add(ambientLight);
+
+    const headlight = new THREE.PointLight(0x00f0ff, 3.5, 90);
+    headlight.position.set(0, 0.4, -1.0);
+    camera.add(headlight);
+    scene.add(camera);
+
+    // 3. Subsystem Rigs & Entities
     const sub = new SubmarineRig(scene, camera);
     const trench = new TrenchEnvironment(scene);
     const marineSnow = new MarineSnow(scene, 1400);
     const hud = new CockpitHUD();
 
-    // 3. Project 2D Canvas HUD into 3D Space (In front of Camera)
-    const hudTexture = new THREE.CanvasTexture(hud.canvas);
-    hudTexture.minFilter = THREE.LinearFilter;
-    hudTexture.magFilter = THREE.LinearFilter;
+    // 4. Fullscreen 2D HUD Canvas Setup
+    const overlayCanvas = document.getElementById('hud-overlay-canvas');
+    const overlayCtx = overlayCanvas.getContext('2d');
 
-    const hudPlaneGeo = new THREE.PlaneGeometry(3.6, 3.6);
-    const hudPlaneMat = new THREE.MeshBasicMaterial({
-      map: hudTexture,
-      transparent: true,
-      opacity: 0.95,
-      depthTest: false,
-      depthWrite: false
+    function resizeOverlay() {
+      overlayCanvas.width = window.innerWidth * window.devicePixelRatio;
+      overlayCanvas.height = window.innerHeight * window.devicePixelRatio;
+    }
+    resizeOverlay();
+
+    // 5. Post-Processing Pipeline Setup
+    let usePostProcessing = true;
+    let pipeline = null;
+
+    try {
+      pipeline = new PostProcessingPipeline(renderer, scene, camera);
+      console.log('PostProcessingPipeline active.');
+    } catch (err) {
+      console.warn('Post-processing fallback to default renderer:', err);
+      usePostProcessing = false;
+    }
+
+    // 6. Flight Keyboard Input State
+    const keyState = {
+      KeyW: false, KeyS: false, KeyA: false, KeyD: false,
+      ShiftLeft: false, ControlLeft: false
+    };
+
+    window.addEventListener('keydown', (e) => {
+      if (keyState.hasOwnProperty(e.code)) keyState[e.code] = true;
     });
-    const hudMesh = new THREE.Mesh(hudPlaneGeo, hudPlaneMat);
-    hudMesh.position.set(0, 0, -2.1); // Positioned inside sub cockpit view
-    camera.add(hudMesh);
-    scene.add(camera);
 
-    // 4. Initialize Post-Processing CRT & Bloom Pipeline
-    const pipeline = new PostProcessingPipeline(renderer, scene, camera);
-
-    // 5. Input Listeners
-    const keys = {};
-    window.addEventListener('keydown', (e) => keys[e.code] = true);
-    window.addEventListener('keyup', (e) => keys[e.code] = false);
+    window.addEventListener('keyup', (e) => {
+      if (keyState.hasOwnProperty(e.code)) keyState[e.code] = false;
+    });
 
     function pollFlightInputs() {
-      let forward = 0, rudder = 0, dive = 0, roll = 0;
-      if (keys['KeyW']) forward += 1.0;
-      if (keys['KeyS']) forward -= 0.6;
-      if (keys['KeyA']) rudder -= 1.0;
-      if (keys['KeyD']) rudder += 1.0;
-      if (keys['ArrowUp']) dive -= 1.0;
-      if (keys['ArrowDown']) dive += 1.0;
-      if (keys['KeyQ']) roll -= 1.0;
-      if (keys['KeyE']) roll += 1.0;
-      return { forward, rudder, dive, roll };
-    }
-
-    // 6. Connect Verbal Hotkey Buttons to Cockpit HUD
-    document.getElementById('btn-sonar').onclick = () => hud.triggerSonarPing();
-    document.getElementById('btn-shield-bow').onclick = () => hud.adjustShield('bow');
-    document.getElementById('btn-shield-stern').onclick = () => hud.adjustShield('stern');
-    document.getElementById('btn-fire').onclick = () => hud.fireTorpedo();
-    document.getElementById('btn-stealth').onclick = () => hud.toggleSilentRunning();
-
-    // 7. Main Simulation Loop
-    const clock = new THREE.Clock();
-
-    function animate() {
-      requestAnimationFrame(animate);
-      const delta = clock.getDelta();
-
-      // Kinematics update
-      const inputs = pollFlightInputs();
-      sub.setInputs(inputs);
-      sub.update(delta);
-
-      // Procedural terrain update
-      trench.update(sub.mesh.position.z);
-      marineSnow.update(sub.mesh.position);
-
-      // Pitch & roll for artificial horizon
-      const euler = new THREE.Euler().setFromQuaternion(sub.mesh.quaternion, 'YXZ');
-      const telemetry = {
-        pitch: euler.x,
-        roll: euler.z,
-        depth: sub.depth
+      return {
+        pitch: (keyState.KeyW ? 1 : 0) - (keyState.KeyS ? 1 : 0),
+        yaw: (keyState.KeyA ? 1 : 0) - (keyState.KeyD ? 1 : 0),
+        roll: (keyState.KeyA ? 1 : 0) - (keyState.KeyD ? 1 : 0),
+        throttleDelta: (keyState.ShiftLeft ? 0.35 : 0) - (keyState.ControlLeft ? 0.35 : 0)
       };
-
-      // Redraw Cockpit vector display onto dynamic canvas
-      hud.draw(telemetry, delta);
-      hudTexture.needsUpdate = true;
-
-      // Render through Unreal Bloom and CRT curvature passes
-      pipeline.render(delta);
     }
 
-    // Handle Window Resizing
+    // 7. Tactical Button Interactions & Audio/Visual Feedback
+    const telemetryStatus = document.getElementById('telemetryStatus');
+    const btnSonar = document.getElementById('btn-sonar');
+    const btnShieldBow = document.getElementById('btn-shield-bow');
+    const btnShieldStern = document.getElementById('btn-shield-stern');
+    const btnFire = document.getElementById('btn-fire');
+    const btnStealth = document.getElementById('btn-stealth');
+    const btnCRT = document.getElementById('btn-crt');
+
+    function triggerButtonGlow(btn, actionText) {
+      btn.classList.add('btn-active');
+      telemetryStatus.innerText = `COMMAND EXECUTED: ${actionText}`;
+      setTimeout(() => {
+        btn.classList.remove('btn-active');
+      }, 450);
+    }
+
+    btnSonar.onclick = () => {
+      hud.triggerSonarPing();
+      triggerButtonGlow(btnSonar, 'TRANSMITTING ACTIVE 360 SONAR PING');
+    };
+
+    btnShieldBow.onclick = () => {
+      hud.adjustShield('bow');
+      triggerButtonGlow(btnShieldBow, 'DEFLECTOR ARRAYS FOCUSED: BOW');
+    };
+
+    btnShieldStern.onclick = () => {
+      hud.adjustShield('stern');
+      triggerButtonGlow(btnShieldStern, 'DEFLECTOR ARRAYS FOCUSED: STERN');
+    };
+
+    btnFire.onclick = () => {
+      hud.fireTorpedo();
+      triggerButtonGlow(btnFire, 'LAUNCHING TACTICAL TORPEDO (BAY 1)');
+    };
+
+    btnStealth.onclick = () => {
+      const isSilent = hud.toggleSilentRunning();
+      triggerButtonGlow(btnStealth, isSilent ? 'SILENT RUNNING ENGAGED (DARK MODE)' : 'STANDARD CRUISE MODE RESTORED');
+      btnStealth.innerText = isSilent ? 'Standard Cruise [Restored]' : 'Silent Running [Go Dark]';
+    };
+
+    btnCRT.onclick = () => {
+      usePostProcessing = !usePostProcessing;
+      btnCRT.innerText = usePostProcessing ? 'CRT Pass [ON]' : 'CRT Pass [OFF]';
+      triggerButtonGlow(btnCRT, usePostProcessing ? 'RETRO CRT FILTER ARMORED' : 'RAW WEBGL RENDER ENGAGED');
+    };
+
+    // 8. Viewport Resize Handler
     window.addEventListener('resize', () => {
       const w = window.innerWidth;
       const h = window.innerHeight;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
-      pipeline.setSize(w, h);
+      resizeOverlay();
+      if (pipeline) pipeline.setSize(w, h);
     });
+
+    // 9. Main Unified Animation & Render Loop
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const delta = Math.min(clock.getDelta(), 0.1);
+
+      // Submarine kinematics & collision checks
+      const flightInputs = pollFlightInputs();
+      sub.setInputs(flightInputs);
+      sub.update(delta);
+
+      // Trench chunk progression & particle updates
+      trench.update(sub.mesh.position.z);
+      marineSnow.update(sub.mesh.position);
+
+      // Package telemetry for HUD instrumentation
+      const telemetry = {
+        speed: sub.currentSpeed || 14.5,
+        depth: Math.abs(sub.mesh.position.y - 120.0),
+        heading: (sub.mesh.rotation.y * (180 / Math.PI)) % 360,
+        pitch: sub.mesh.rotation.x,
+        roll: sub.mesh.rotation.z,
+        proximity: trench.checkProximity ? trench.checkProximity(sub.mesh.position) : 48.0
+      };
+
+      // 10. Pass 1: Render 3D World (CRT Shaders or Direct Framebuffer)
+      if (usePostProcessing && pipeline) {
+        pipeline.render(delta);
+      } else {
+        renderer.render(scene, camera);
+      }
+
+      // 11. Pass 2: Draw Cockpit HUD Vector Instruments to Canvas
+      hud.draw(telemetry, delta);
+
+      // 12. Pass 3: Blit Vector HUD directly to screen overlay
+      overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+      overlayCtx.drawImage(hud.canvas, 0, 0, overlayCanvas.width, overlayCanvas.height);
+    }
 
     animate();
   </script>
