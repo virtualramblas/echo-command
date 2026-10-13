@@ -30,9 +30,12 @@
     const toggleBtn = document.getElementById('toggleBtn');
     const statsDiv = document.getElementById('stats');
 
-    // For testing/mocking, we can use a dummy ONNX model, or the actual exported NeuDecide model path.
-    const MODEL_PATH = 'https://raw.githubusercontent.com/onnx/models/main/validated/vision/classification/mnist/model/mnist-12.onnx'; // Placeholder validation model
-    
+    // Option 1: A verified, high-availability public CDN model for testing pipeline connectivity
+    const MODEL_PATH = 'https://media.githubusercontent.com/media/onnx/models/main/validated/vision/classification/mnist/model/mnist-12.onnx';
+
+    // Option 2 (Recommended for Production): Download your model and put it inside your project folder
+    // const MODEL_PATH = './models/neudecide.onnx'; 
+
     // Mapped labels expected from model output indices
     const TOOL_MAP = {
       0: "🎛️ SYSTEM: ACTIVE SONAR",
