@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Task 2.2: Sub-Surface Cockpit & Retro CRT Shader</title>
+  <style>
+    * { box-sizing: border-box; }
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background-color: #000;
+      font-family: 'Courier New', Courier, monospace;
+      user-select: none;
+    }
+
+    #webgl-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    /* Screen UI Overlay */
+    .terminal-nav {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 10;
+      color: #39ff14;
+      pointer-events: none;
+    }
+
+    .command-prompt {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      display: flex;
+      gap: 12px;
+    }
+
+    button.tactical-btn {
+      background: rgba(13, 22, 36, 0.85);
+      border: 1px solid #39ff14;
+      color: #39ff14;
+      padding: 8px 16px;
+      font-family: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      border-radius: 3px;
+      transition: all 0.2s ease;
+      box-shadow: 0 0 8px rgba(57, 255, 20, 0.2);
+    }
+
+    button.tactical-btn:hover {
+      background: rgba(57, 255, 20, 0.25);
+      box-shadow: 0 0 14px rgba(57, 255, 20, 0.5);
+    }
+  </style>
+</head>
+<body>
+
+  <div id="webgl-container"></div>
+
+  <div class="terminal-nav">
+    <h3 style="margin: 0; letter-spacing: 2px;">ECHO COMMAND // V-DISPLAY 2.2</h3>
+    <div style="font-size: 12px; color: #8fa0ba; margin-top: 4px;">
+      SIMULATED CRT SCANLINE RESOLUTION: 720 LINES | BARREL CURVATURE: ACTIVE
+    </div>
+  </div>
+
+  <!-- Interactive buttons to test voice hotkeys manually -->
+  <div class="command-prompt">
+    <button class="tactical-btn" id="btn-sonar">Ping Radar [Sonar]</button>
+    <button class="tactical-btn" id="btn-shield-bow">Shields Bow</button>
+    <button class="tactical-btn" id="btn-shield-stern">Shields Stern</button>
+    <button class="tactical-btn" id="btn-fire">Launch Torpedo</button>
+    <button class="tactical-btn" id="btn-stealth">Go Dark [Stealth]</button>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+    import { SubmarineRig } from './SubmarineRig.js';
+    import { TrenchEnvironment } from './TrenchEnvironment.js';
+    import { MarineSnow } from './MarineSnow.js';
+    import { PostProcessingPipeline } from './PostProcessingPipeline.js';
+    import { CockpitHUD } from './CockpitHUD.js';
+
+    // 1. Scene, Camera, and Renderer
+    const container = document.getElementById('webgl-container');
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x02070e, 0.024);
+
+    const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 500);
+    const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    // 2. Gameplay Systems
+    const sub = new SubmarineRig(scene, camera);
+    const trench = new TrenchEnvironment(scene);
+    const marineSnow = new MarineSnow(scene, 1400);
+    const hud = new CockpitHUD();
+
+    // 3. Project 2D Canvas HUD into 3D Space (In front of Camera)
+    const hudTexture = new THREE.CanvasTexture(hud.canvas);
+    hudTexture.minFilter = THREE.LinearFilter;
+    hudTexture.magFilter = THREE.LinearFilter;
+
+    const hudPlaneGeo = new THREE.PlaneGeometry(3.6, 3.6);
+    const hudPlaneMat = new THREE.MeshBasicMaterial({
+      map: hudTexture,
+      transparent: true,
+      opacity: 0.95,
+      depthTest: false,
+      depthWrite: false
+    });
+    const hudMesh = new THREE.Mesh(hudPlaneGeo, hudPlaneMat);
+    hudMesh.position.set(0, 0, -2.1); // Positioned inside sub cockpit view
+    camera.add(hudMesh);
+    scene.add(camera);
+
+    // 4. Initialize Post-Processing CRT & Bloom Pipeline
+    const pipeline = new PostProcessingPipeline(renderer, scene, camera);
+
+    // 5. Input Listeners
+    const keys = {};
+    window.addEventListener('keydown', (e) => keys[e.code] = true);
+    window.addEventListener('keyup', (e) => keys[e.code] = false);
+
+    function pollFlightInputs() {
+      let forward = 0, rudder = 0, dive = 0, roll = 0;
+      if (keys['KeyW']) forward += 1.0;
+      if (keys['KeyS']) forward -= 0.6;
+      if (keys['KeyA']) rudder -= 1.0;
+      if (keys['KeyD']) rudder += 1.0;
+      if (keys['ArrowUp']) dive -= 1.0;
+      if (keys['ArrowDown']) dive += 1.0;
+      if (keys['KeyQ']) roll -= 1.0;
+      if (keys['KeyE']) roll += 1.0;
+      return { forward, rudder, dive, roll };
+    }
+
+    // 6. Connect Verbal Hotkey Buttons to Cockpit HUD
+    document.getElementById('btn-sonar').onclick = () => hud.triggerSonarPing();
+    document.getElementById('btn-shield-bow').onclick = () => hud.adjustShield('bow');
+    document.getElementById('btn-shield-stern').onclick = () => hud.adjustShield('stern');
+    document.getElementById('btn-fire').onclick = () => hud.fireTorpedo();
+    document.getElementById('btn-stealth').onclick = () => hud.toggleSilentRunning();
+
+    // 7. Main Simulation Loop
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+
+      // Kinematics update
+      const inputs = pollFlightInputs();
+      sub.setInputs(inputs);
+      sub.update(delta);
+
+      // Procedural terrain update
+      trench.update(sub.mesh.position.z);
+      marineSnow.update(sub.mesh.position);
+
+      // Pitch & roll for artificial horizon
+      const euler = new THREE.Euler().setFromQuaternion(sub.mesh.quaternion, 'YXZ');
+      const telemetry = {
+        pitch: euler.x,
+        roll: euler.z,
+        depth: sub.depth
+      };
+
+      // Redraw Cockpit vector display onto dynamic canvas
+      hud.draw(telemetry, delta);
+      hudTexture.needsUpdate = true;
+
+      // Render through Unreal Bloom and CRT curvature passes
+      pipeline.render(delta);
+    }
+
+    // Handle Window Resizing
+    window.addEventListener('resize', () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      pipeline.setSize(w, h);
+    });
+
+    animate();
+  </script>
+</body>
+</html>
